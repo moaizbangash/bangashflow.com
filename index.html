@@ -31,7 +31,9 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','ui-sans-ser
   .pop { animation: pop .35s ease both; }
   @keyframes flash { 0%,100% { box-shadow: 0 0 0 0 rgba(2,132,199,0);} 50% { box-shadow: 0 0 0 8px rgba(2,132,199,.35);} }
   .flash { animation: flash 1.4s ease 3; }
-  @media (prefers-reduced-motion: reduce) { .pulse-ring, .pop, .flash { animation: none; } html { scroll-behavior: auto; } }
+  @keyframes floaty { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-6px);} }
+  .floaty { animation: floaty 5s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .pulse-ring, .pop, .flash, .floaty { animation: none; } html { scroll-behavior: auto; } }
   :focus-visible { outline: 3px solid #0284c7; outline-offset: 2px; }
 </style>
 </head>
@@ -53,13 +55,17 @@ const WA_NUM = "923365453270";
 const EMAIL = "bangashflow@gmail.com";
 const LINKEDIN = "https://www.linkedin.com/in/abdulmoaiz13";
 const PHONE = "+92 336 5453270";
+/* Lead backup: paste your Google Apps Script web-app URL here to save every form
+   submission to a Google Sheet as backup. Leave empty ("") to keep it disabled —
+   the WhatsApp/email handoff keeps working exactly as before. */
+const LEAD_BACKUP_URL = "";
 const OWNER_HASHES = { "mrmoaiz384@gmail.com": "1bd50a57bc27ada357c68e945be673178843354f4fe1e965e1f60705879c53d4", "bangashflow@gmail.com": "46a4ecc2dfc4a80d72665a7f46d73c3ed1cde4300aa70f09f588458b26dae715" };
 const waLink = (t) => "https://wa.me/" + WA_NUM + "?text=" + encodeURIComponent(t);
 const CURRENCIES = { USD: { s: "$", r: 1 }, GBP: { s: "£", r: 0.79 }, CAD: { s: "CA$", r: 1.37 }, AUD: { s: "A$", r: 1.53 } };
 const fmt = (usd, c) => { const k = CURRENCIES[c]; const v = usd === 0 ? 0 : Math.round((usd * k.r) / 5) * 5; return k.s + v.toLocaleString("en-US"); };
 
 const DEFAULT_PLANS = [
-  { id: "starter", name: "Starter", popular: false, setup: 800, monthly: 249, channels: "Website chat + SMS (WhatsApp in UK/Australia)", appointments: "Booking request capture with instant staff alerts", reminders: "None (basic confirmation only)", languages: "English + 1", delivery: "7–10 days", support: "Hosting, monitoring, 2 hrs changes/mo" },
+  { id: "starter", name: "Starter", popular: false, setup: 800, monthly: 250, channels: "Website chat + SMS (WhatsApp in UK/Australia)", appointments: "Booking request capture with instant staff alerts", reminders: "None (basic confirmation only)", languages: "English + 1", delivery: "7–10 days", support: "Hosting, monitoring, 2 hrs changes/mo" },
   { id: "pro", name: "Pro", popular: true, setup: 1800, monthly: 449, channels: "Starter + missed-call text-back", appointments: "Live 2-way booking into 1 calendar/PMS", reminders: "Appointment reminders & no-show reduction flows", languages: "English + 2", delivery: "2–3 weeks", support: "Hosting, monitoring, 4 hrs changes/mo" },
   { id: "elite", name: "Elite", popular: false, setup: 3500, monthly: 799, channels: "Pro + 24/7 AI voice receptionist (phone)", appointments: "Multi-doctor and multi-location scheduling", reminders: "Reminders + reactivation of lapsed patients", languages: "English + 3", delivery: "4–6 weeks", support: "Hosting, monitoring, 8 hrs changes + VIP support" },
 ];
@@ -227,6 +233,19 @@ function SectionHead({ eyebrow, title, sub }) {
 }
 function AdminTag({ children }) { return <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 rounded-full px-2 py-0.5">{children}</span>; }
 
+/* ---------- silent lead backup (fire-and-forget; safe no-op until LEAD_BACKUP_URL is set) ---------- */
+function backupLead(lead) {
+  try {
+    if (!LEAD_BACKUP_URL) return;
+    fetch(LEAD_BACKUP_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(Object.assign({}, lead, { ua: (navigator.userAgent || "").slice(0, 160) }))
+    }).catch(function () {});
+  } catch (x) {}
+}
+
 /* ---------- lead form (shared by modal + contact section) ---------- */
 function LeadForm({ plan, source, countries, onSaved, compact }) {
   const [f, setF] = useState({ name: "", email: "", clinic: "", country: "", phone: "" });
@@ -244,7 +263,7 @@ function LeadForm({ plan, source, countries, onSaved, compact }) {
     setErr(er);
     if (Object.keys(er).length) return;
     const lead = { id: Date.now(), ...f, name: f.name.trim(), email: f.email.trim(), clinic: f.clinic.trim(), plan: plan || "General demo request", source, at: new Date().toISOString() };
-    onSaved(lead); setDone(lead);
+    onSaved(lead); backupLead(lead); setDone(lead);
   };
   if (done) {
     const msg = "Hello Abdul, I'm " + done.name + " from " + done.clinic + " (" + done.country + "). I'd like to book a free demo" + (plan ? " and learn more about: " + plan : "") + ". My email: " + done.email + ".";
@@ -359,14 +378,42 @@ function OfferEditor({ offer, onSave, onClose }) {
   );
 }
 
+/* ---------- external video links (YouTube embeds inline, others open in new tab) ---------- */
+function ytId(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      const v = u.searchParams.get("v"); if (v) return v;
+      const m = u.pathname.match(/^\/(embed|shorts)\/([\w-]+)/); if (m) return m[2];
+    }
+    if (host === "youtu.be") { const v = u.pathname.replace(/\//g, ""); if (v) return v; }
+  } catch (e) {}
+  return null;
+}
+function ytEmbedUrl(url) { const id = ytId(url); return id ? "https://www.youtube.com/embed/" + id : null; }
+function ytThumb(url) { const id = ytId(url); return id ? "https://img.youtube.com/vi/" + id + "/hqdefault.jpg" : null; }
+function LinkEmbed({ url, title }) {
+  const emb = ytEmbedUrl(url);
+  if (emb) return <div className="relative w-full rounded-2xl overflow-hidden ring-1 ring-slate-200" style={{ aspectRatio: "16/9" }}><iframe src={emb} title={title || "Demo video"} className="absolute inset-0 w-full h-full" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div>;
+  return (
+    <div className="rounded-2xl bg-sky-50 ring-1 ring-sky-100 p-8 text-center">
+      <div className="mx-auto w-14 h-14 rounded-full bg-sky-600 text-white grid place-items-center mb-4"><Icon n="play" fill className="w-6 h-6" /></div>
+      <p className="font-bold text-lg">Watch this demo video</p>
+      <p className="text-sm text-slate-600 mt-1 mb-5">This video is hosted externally and will open in a new tab.</p>
+      <Btn href={url}>Watch video<Icon n="arrow" className="w-4 h-4" /></Btn>
+    </div>
+  );
+}
+
 /* ---------- media upload (demos + testimonials) ---------- */
 function MediaUploader({ mode, onSave, onClose }) {
-  const [t, setT] = useState({ title: "", sub: "", desc: "", name: "", role: "", country: "United Kingdom", quote: "", rating: 5 });
+  const [t, setT] = useState({ title: "", sub: "", desc: "", link: "", name: "", role: "", country: "United Kingdom", quote: "", rating: 5 });
   const [media, setMedia] = useState(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
   const s = (k) => (e) => setT({ ...t, [k]: e.target.value });
   const pick = async (f) => { setErr(""); setBusy(true); try { setMedia(await processMedia(f)); } catch (e) { setErr(e.message || "Could not read file."); } setBusy(false); };
   const save = () => {
-    if (mode === "demo") { if (!t.title.trim()) return setErr("Title is required."); if (!media) return setErr("Please upload an image or video."); onSave({ id: "u" + Date.now(), title: t.title.trim(), sub: t.sub, desc: t.desc, media }); }
+    if (mode === "demo") { if (!t.title.trim()) return setErr("Title is required."); const link = (t.link || "").trim(); if (!media && !link) return setErr("Please upload an image or video, or paste a video link below."); let m = media; if (link) { m = { kind: "link", src: link }; if (media && media.kind === "image") m.thumb = media.src; } onSave({ id: "u" + Date.now(), title: t.title.trim(), sub: t.sub, desc: t.desc, media: m }); }
     else { if (!t.name.trim()) return setErr("Name is required."); if (!t.quote.trim() && !media) return setErr("Add a quote or upload a screenshot / video / PDF."); onSave({ id: "t" + Date.now(), name: t.name.trim(), role: t.role, country: t.country, quote: t.quote.trim(), rating: Number(t.rating), media }); }
   };
   return (
@@ -392,9 +439,79 @@ function MediaUploader({ mode, onSave, onClose }) {
           {media && media.kind === "image" && <img src={media.src} alt="Preview" className="mt-3 rounded-xl max-h-48 ring-1 ring-slate-200" />}
           {media && media.kind !== "image" && <p className="mt-3 text-sm text-emerald-700 font-medium">{media.kind.toUpperCase()} ready to save.</p>}
         </div>
+        {mode === "demo" && (
+          <div>
+            <div className="flex items-center gap-3 mb-3"><span className="h-px flex-1 bg-slate-200" /><span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">or</span><span className="h-px flex-1 bg-slate-200" /></div>
+            <Field label="Video link (YouTube, LinkedIn, etc.) — no upload needed"><input className={inputCls} value={t.link} onChange={s("link")} placeholder="https://www.youtube.com/watch?v=...  or  https://www.linkedin.com/posts/..." inputMode="url" /></Field>
+            <p className="text-xs text-slate-500 mt-2">Best for large videos: paste a link and skip the 3 MB upload limit. YouTube links play inside the page with an automatic thumbnail; other links open in a new tab. Tip: upload an image above to use it as the card thumbnail for non-YouTube links.</p>
+          </div>
+        )}
         {err && <div role="alert" className="rounded-xl bg-red-50 ring-1 ring-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
         <div className="flex gap-3 justify-end"><Btn kind="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={save} disabled={busy}>Save</Btn></div>
       </div>
+    </Modal>
+  );
+}
+
+/* ---------- showcase (admin-uploaded media) ---------- */
+function dataToBlobUrl(d) {
+  try { const parts = d.split(","); const m = parts[0].match(/:(.*?);/)[1]; const bin = atob(parts[1]); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return URL.createObjectURL(new Blob([u], { type: m })); } catch (e) { return d; }
+}
+async function processShowcase(file) {
+  if (file.type.startsWith("image/") || file.type.startsWith("video/") || file.type === "application/pdf") { const m = await processMedia(file); return { ...m, name: file.name }; }
+  return { kind: "file", src: await readData(file, 2.5 * 1024 * 1024), name: file.name, mime: file.type };
+}
+function ShowcaseUploader({ onSave, onClose }) {
+  const [t, setT] = useState({ title: "", desc: "" }); const [media, setMedia] = useState(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const pick = async (f) => { setErr(""); setBusy(true); try { const m = await processShowcase(f); setMedia(m); if (!t.title) setT((x) => ({ ...x, title: f.name.replace(/\.[^.]+$/, "") })); } catch (e) { setErr(e.message || "Could not read file."); } setBusy(false); };
+  const save = () => { if (!media) return setErr("Please choose a file first."); if (!t.title.trim()) return setErr("Please add a title."); onSave({ id: "s" + Date.now(), title: t.title.trim(), desc: t.desc.trim(), media }); };
+  return (
+    <Modal onClose={onClose} title="Upload to showcase" wide>
+      <div className="grid gap-4">
+        <div>
+          <FileBtn label="Choose video, screenshot, picture or file" accept="*/*" onFile={pick} />
+          <p className="text-xs text-slate-500 mt-2">Images are compressed automatically. Video limit 3 MB, PDF and other files 2.5 MB (browser storage is limited).</p>
+          {busy && <p className="text-sm text-sky-700 mt-2">Processing...</p>}
+          {media && media.kind === "image" && <img src={media.src} alt="Preview" className="mt-3 rounded-xl max-h-48 ring-1 ring-slate-200" />}
+          {media && media.kind === "video" && <video src={media.src} muted playsInline className="mt-3 rounded-xl max-h-48 ring-1 ring-slate-200" />}
+          {media && (media.kind === "pdf" || media.kind === "file") && <p className="mt-3 text-sm text-emerald-700 font-medium">{media.name} ready to save.</p>}
+        </div>
+        <Field label="Title" required><input className={inputCls} value={t.title} onChange={(e) => setT({ ...t, title: e.target.value })} /></Field>
+        <Field label="Short description"><textarea rows="3" className={inputCls} value={t.desc} onChange={(e) => setT({ ...t, desc: e.target.value })} /></Field>
+        {err && <div role="alert" className="rounded-xl bg-red-50 ring-1 ring-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
+        <div className="flex gap-3 justify-end"><Btn kind="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={save} disabled={busy}>Save</Btn></div>
+      </div>
+    </Modal>
+  );
+}
+function ShowcaseCard({ item, i, admin, onOpen, onDelete }) {
+  const m = item.media; const label = { image: "Image", video: "Video", pdf: "PDF", file: "File" }[m.kind];
+  return (
+    <article className="relative pop" style={{ animationDelay: (i % 6) * 0.08 + "s" }}>
+      <div className="floaty" style={{ animationDelay: (i % 6) * 0.5 + "s" }}>
+        <button onClick={onOpen} aria-label={"Open " + item.title} className="group block w-full text-left rounded-3xl overflow-hidden bg-white ring-1 ring-slate-200 hover:ring-sky-300 hover:shadow-xl hover:shadow-sky-900/10 transition">
+          <div className="relative aspect-[4/3] bg-gradient-to-br from-sky-100 to-sky-50 overflow-hidden grid place-items-center">
+            {m.kind === "image" && <img src={m.src} alt={item.title} className="absolute inset-0 w-full h-full object-cover transition duration-500 group-hover:scale-105" />}
+            {m.kind === "video" && <><video src={m.src} autoPlay muted loop playsInline preload="metadata" className="absolute inset-0 w-full h-full object-cover" /><span className="absolute bottom-3 right-3 w-10 h-10 rounded-full bg-white/90 text-sky-700 grid place-items-center shadow"><Icon n="play" fill className="w-4 h-4" /></span></>}
+            {(m.kind === "pdf" || m.kind === "file") && <div className="text-center px-6"><div className="mx-auto w-14 h-14 rounded-2xl bg-white text-sky-600 grid place-items-center shadow-sm"><Icon n="file" className="w-7 h-7" /></div><p className="mt-3 text-xs font-semibold text-slate-600 break-all line-clamp-2">{m.name}</p></div>}
+            <span className="absolute top-3 left-3 text-[10px] font-extrabold uppercase tracking-wider bg-white/90 text-sky-700 rounded-full px-2.5 py-1">{label}</span>
+          </div>
+          <div className="p-5"><h3 className="font-bold text-slate-900">{item.title}</h3>{item.desc && <p className="mt-1 text-sm text-slate-600 leading-relaxed">{item.desc}</p>}</div>
+        </button>
+      </div>
+      {admin && <button onClick={onDelete} className="absolute top-3 right-3 z-10 inline-flex items-center gap-1 bg-white text-red-600 text-xs font-bold rounded-full px-3 py-1.5 shadow"><Icon n="trash" className="w-3.5 h-3.5" />Delete</button>}
+    </article>
+  );
+}
+function ShowcaseViewer({ item, onClose }) {
+  const m = item.media; const [url] = useState(() => (m.kind === "pdf" ? dataToBlobUrl(m.src) : m.src));
+  return (
+    <Modal onClose={onClose} title={item.title} wide>
+      {m.kind === "image" && <img src={m.src} alt={item.title} className="w-full rounded-2xl" />}
+      {m.kind === "video" && <video src={m.src} controls autoPlay playsInline className="w-full rounded-2xl" />}
+      {m.kind === "pdf" && <><iframe src={url} title={item.title} className="w-full h-[60vh] rounded-2xl ring-1 ring-slate-200" /><a href={url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-sky-700"><Icon n="link" className="w-4 h-4" />Open PDF in a new tab</a></>}
+      {m.kind === "file" && <div className="rounded-2xl bg-slate-50 ring-1 ring-slate-200 p-8 text-center"><div className="mx-auto w-14 h-14 rounded-2xl bg-white text-sky-600 grid place-items-center shadow-sm"><Icon n="file" className="w-7 h-7" /></div><p className="mt-3 font-semibold break-all">{m.name}</p><a href={m.src} download={m.name} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-sky-600 text-white px-5 py-3 text-sm font-semibold hover:bg-sky-700"><Icon n="upload" className="w-4 h-4 rotate-180" />Download file</a></div>}
+      {item.desc && <p className="mt-4 text-sm text-slate-600 leading-relaxed">{item.desc}</p>}
     </Modal>
   );
 }
@@ -496,6 +613,7 @@ function App() {
   const [demos, setDemos] = useStored("bf_demos", DEFAULT_DEMOS);
   const [testis, setTestis] = useStored("bf_testimonials", []);
   const [leads, setLeads] = useStored("bf_leads", []);
+  const [showcase, setShowcase] = useStored("bf_showcase", []);
   const [admin, setAdmin] = useState(() => { try { return sessionStorage.getItem("bf_admin") === "1"; } catch (e) { return false; } });
   const [cur, setCur] = useState("USD");
   const [menu, setMenu] = useState(false);
@@ -506,6 +624,7 @@ function App() {
   const [offerEdit, setOfferEdit] = useState(null);
   const [upload, setUpload] = useState(null);
   const [light, setLight] = useState(null);
+  const [sview, setSview] = useState(null);
   const [hl, setHl] = useState(null);
   const [copied, setCopied] = useState("");
   const logoSrc = logo || LOGO_DEFAULT, ceoSrc = ceo || PHOTO_DEFAULT;
@@ -526,8 +645,8 @@ function App() {
     setCopied(id); setTimeout(() => setCopied(""), 2200);
   };
   const logout = () => { try { sessionStorage.removeItem("bf_admin"); } catch (e) {} setAdmin(false); setHub(false); };
-  const exportData = () => JSON.stringify({ logo, ceo, plans, offers, demos, testimonials: testis });
-  const importData = (txt) => { try { const d = JSON.parse(txt); if (d.logo !== undefined) setLogo(d.logo); if (d.ceo !== undefined) setCeo(d.ceo); if (d.plans) setPlans(d.plans); if (d.offers) setOffers(d.offers); if (d.demos) setDemos(d.demos); if (d.testimonials) setTestis(d.testimonials); return true; } catch (e) { return false; } };
+  const exportData = () => JSON.stringify({ logo, ceo, plans, offers, demos, testimonials: testis, showcase });
+  const importData = (txt) => { try { const d = JSON.parse(txt); if (d.logo !== undefined) setLogo(d.logo); if (d.ceo !== undefined) setCeo(d.ceo); if (d.plans) setPlans(d.plans); if (d.offers) setOffers(d.offers); if (d.demos) setDemos(d.demos); if (d.testimonials) setTestis(d.testimonials); if (d.showcase) setShowcase(d.showcase); return true; } catch (e) { return false; } };
 
   const services = [
     ["calendar", "Appointment Booking", "Two-way calendar sync books patients into real, open slots, with optional pre-consultation intake questions."],
@@ -623,6 +742,20 @@ function App() {
             </div>
           </div>
         </section>
+
+        {/* SHOWCASE */}
+        {(admin || showcase.length > 0) && (
+          <section id="showcase" className="py-20 bg-white border-y border-sky-100">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6">
+              <SectionHead eyebrow="Showcase" title="See our systems in action" sub="Videos, screenshots and documents from our work. Tap any item to open it." />
+              {admin && <div className="flex justify-center mb-8"><Btn kind="ghost" onClick={() => setUpload("showcase")}><Icon n="upload" className="w-4 h-4" />Admin: Upload Video, Screenshot, Picture or File</Btn></div>}
+              {showcase.length === 0 && <p className="text-center text-slate-500 text-sm">Nothing uploaded yet. Only you can see this section until you add something.</p>}
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {showcase.map((s, i) => <ShowcaseCard key={s.id} item={s} i={i} admin={admin} onOpen={() => setSview(s)} onDelete={() => confirm("Delete this item?") && setShowcase(showcase.filter((x) => x.id !== s.id))} />)}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* SERVICES */}
         <section id="services" className="py-20">
@@ -758,6 +891,7 @@ function App() {
                     <div className="relative aspect-[16/10] bg-gradient-to-br from-sky-100 to-sky-50 grid place-items-center overflow-hidden">
                       {d.media && d.media.kind === "image" && <img src={d.media.src} alt={d.title} className="absolute inset-0 w-full h-full object-cover" />}
                       {d.media && d.media.kind === "video" && <><video src={d.media.src} className="absolute inset-0 w-full h-full object-cover" muted playsInline preload="metadata" /><span className="relative w-14 h-14 rounded-full bg-white/90 text-sky-700 grid place-items-center"><Icon n="play" fill className="w-6 h-6" /></span></>}
+                      {d.media && d.media.kind === "link" && <>{(d.media.thumb || ytThumb(d.media.src)) && <img src={d.media.thumb || ytThumb(d.media.src)} alt={d.title} className="absolute inset-0 w-full h-full object-cover" />}<span className="relative w-14 h-14 rounded-full bg-white/90 text-sky-700 grid place-items-center shadow"><Icon n="play" fill className="w-6 h-6" /></span><span className="absolute bottom-3 right-3 text-[10px] font-bold uppercase tracking-wider bg-sky-600 text-white rounded-full px-2.5 py-1">Video link</span></>}
                       {!d.media && <div className="w-[78%] space-y-2">{(d.transcript || []).slice(0, 2).map((m, i) => <div key={i} className={cx("text-[11px] leading-snug rounded-xl px-3 py-2 shadow-sm max-w-[85%]", m[0] === "Patient" ? "ml-auto bg-sky-600 text-white" : "bg-white text-slate-700")}>{m[1]}</div>)}</div>}
                     </div>
                     <div className="p-6"><h3 className="font-bold text-lg">{d.title}</h3><p className="text-sky-700 text-sm font-semibold">{d.sub}</p><p className="mt-2 text-sm text-slate-600 leading-relaxed">{d.desc}</p>{d.concept && <p className="mt-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">Concept demo</p>}</div>
@@ -856,11 +990,14 @@ function App() {
       {admin && hub && <AdminHub onClose={() => setHub(false)} logo={logo} setLogo={setLogo} ceo={ceo} setCeo={setCeo} offers={offers} setOffers={setOffers} leads={leads} setLeads={setLeads} onEditOffer={(o) => setOfferEdit(o)} exportData={exportData} importData={importData} onLogout={logout} />}
       {admin && planEdit && <PlanEditor plan={planEdit} onClose={() => setPlanEdit(null)} onSave={(p) => { setPlans(plans.map((x) => (x.id === p.id ? p : x))); setPlanEdit(null); }} />}
       {admin && offerEdit && <OfferEditor offer={offerEdit} onClose={() => setOfferEdit(null)} onSave={(o) => { setOffers(offers.some((x) => x.id === o.id) ? offers.map((x) => (x.id === o.id ? o : x)) : [...offers, o]); setOfferEdit(null); }} />}
-      {admin && upload && <MediaUploader mode={upload} onClose={() => setUpload(null)} onSave={(item) => { if (upload === "demo") setDemos([...demos, item]); else setTestis([...testis, item]); setUpload(null); }} />}
+      {admin && upload === "showcase" && <ShowcaseUploader onClose={() => setUpload(null)} onSave={(item) => { setShowcase([...showcase, item]); setUpload(null); }} />}
+      {admin && upload && upload !== "showcase" && <MediaUploader mode={upload} onClose={() => setUpload(null)} onSave={(item) => { if (upload === "demo") setDemos([...demos, item]); else setTestis([...testis, item]); setUpload(null); }} />}
+      {sview && <ShowcaseViewer item={sview} onClose={() => setSview(null)} />}
       {light && (
         <Modal onClose={() => setLight(null)} title={light.title} wide>
           {light.media && light.media.kind === "image" && <img src={light.media.src} alt={light.title} className="w-full rounded-2xl" />}
           {light.media && light.media.kind === "video" && <video src={light.media.src} controls autoPlay playsInline className="w-full rounded-2xl" />}
+          {light.media && light.media.kind === "link" && <LinkEmbed url={light.media.src} title={light.title} />}
           {!light.media && <div className="space-y-3 bg-slate-50 rounded-2xl p-5">{(light.transcript || []).map((m, i) => <div key={i} className={cx("flex", m[0] === "Patient" ? "justify-end" : "justify-start")}><div className={cx("max-w-[85%] rounded-2xl px-4 py-2.5 text-sm", m[0] === "Patient" ? "bg-sky-600 text-white" : "bg-white ring-1 ring-slate-100")}><p className="text-[10px] font-bold uppercase tracking-wider opacity-60 mb-0.5">{m[0]}</p>{m[1]}</div></div>)}</div>}
           <p className="mt-4 text-sm text-slate-600">{light.desc}</p>
           {light.concept && <p className="mt-2 text-xs text-slate-400">Concept demo: an illustrative scenario, not a real patient conversation.</p>}
